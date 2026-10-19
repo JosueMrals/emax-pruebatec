@@ -1,7 +1,8 @@
-import { createClient } from "@/utils/supabase/server";
+import { Suspense } from "react";
 import { cookies } from "next/headers";
+import { createClient } from "@/utils/supabase/server";
 
-export default async function Page() {
+async function TodoList() {
   const cookieStore = await cookies();
   const supabase = createClient(cookieStore);
 
@@ -13,5 +14,13 @@ export default async function Page() {
         <li key={todo.id}>{todo.name}</li>
       ))}
     </ul>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<p>Loading…</p>}>
+      <TodoList />
+    </Suspense>
   );
 }
