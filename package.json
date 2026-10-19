@@ -11,7 +11,7 @@
     "test": "tsx --test lib/**/*.test.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.135.0",
+    "@google/genai": "^2.30.0",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
     "@supabase/ssr": "^0.12.7",

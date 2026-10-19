@@ -42,7 +42,10 @@ export function OcrUpload({ onResult }: { onResult: (result: OcrResult) => void 
     <Card>
       <CardHeader>
         <CardTitle>Leer factura con OCR</CardTitle>
-        <CardDescription>Sube el PDF o una foto y se rellenarán los campos. Revísalos antes de guardar.</CardDescription>
+        <CardDescription>
+          Sube el PDF o una foto y se rellenarán los campos. Revísalos antes de guardar. Usa el nivel gratuito de
+          Gemini, que puede usar el contenido para mejorar sus productos: no subas facturas con datos reales.
+        </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
