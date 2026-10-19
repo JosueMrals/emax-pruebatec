@@ -3,11 +3,9 @@ import { connection } from "next/server";
 import { MarkPaidButton } from "@/components/mark-paid-button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { dateFormat } from "@/lib/dates";
 import { db } from "@/lib/db";
 import { formatCents } from "@/lib/money";
-
-// issueDate is a DATE stored at UTC midnight; format in UTC so it never shifts a day.
-const dateFmt = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" });
 
 export async function InvoiceList() {
   await connection();
@@ -48,7 +46,7 @@ export async function InvoiceList() {
         {invoices.map((inv) => (
           <TableRow key={inv.id}>
             <TableCell className="font-medium">{inv.number}</TableCell>
-            <TableCell>{dateFmt.format(inv.issueDate)}</TableCell>
+            <TableCell>{dateFormat.format(inv.issueDate)}</TableCell>
             <TableCell>
               <div>{inv.client.name}</div>
               {inv.operationType === "INTRA_SERVICIOS" && <Badge variant="secondary">Intracomunitaria</Badge>}

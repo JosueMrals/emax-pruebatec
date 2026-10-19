@@ -34,7 +34,7 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
           vatRate: data.vatRate,
           irpfRate: data.irpfRate,
           deductible: data.deductible,
-          source: "MANUAL",
+          source: data.source,
           ...totals,
         },
       });

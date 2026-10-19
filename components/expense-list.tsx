@@ -2,11 +2,9 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { dateFormat } from "@/lib/dates";
 import { db } from "@/lib/db";
 import { formatCents } from "@/lib/money";
-
-// date is a DATE stored at UTC midnight; format in UTC so it never shifts a day.
-const dateFmt = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" });
 
 export async function ExpenseList() {
   await connection();
@@ -43,7 +41,7 @@ export async function ExpenseList() {
       <TableBody>
         {expenses.map((exp) => (
           <TableRow key={exp.id}>
-            <TableCell>{dateFmt.format(exp.date)}</TableCell>
+            <TableCell>{dateFormat.format(exp.date)}</TableCell>
             <TableCell>{exp.supplier.name}</TableCell>
             <TableCell>
               <div>{exp.description}</div>

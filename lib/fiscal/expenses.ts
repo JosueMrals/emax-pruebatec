@@ -17,6 +17,11 @@ export interface ExpenseTotals {
   totalCents: number;
 }
 
+// Difference between a stated total and base + IVA - IRPF; 0 means the amounts are consistent.
+export function totalMismatchCents(amounts: ExpenseTotals): number {
+  return amounts.baseCents + amounts.vatCents - amounts.irpfCents - amounts.totalCents;
+}
+
 // The withheld IRPF is paid to Hacienda (Modelo 111), not to the supplier.
 export function expenseTotals({ baseCents, vatRate, irpfRate }: ExpenseInput): ExpenseTotals {
   const vatCents = percentOf(baseCents, vatRate);

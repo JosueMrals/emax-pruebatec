@@ -27,4 +27,5 @@ export const expenseInputSchema = z.object({
   vatRate: z.literal(VAT_RATES, { error: "Tipo de IVA no válido" }),
   irpfRate: z.literal(IRPF_RATES, { error: "Tipo de IRPF no válido" }),
   deductible: z.boolean({ error: "Valor no válido" }),
+  source: z.enum(["MANUAL", "OCR"], { error: "Origen no válido" }),
 });

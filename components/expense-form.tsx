@@ -3,6 +3,7 @@
 import { useId, useState, useTransition } from "react";
 import { createExpense } from "@/actions/expenses";
 import { FieldError } from "@/components/field-error";
+import { OcrUpload } from "@/components/ocr-upload";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +14,8 @@ import type { ActionResult } from "@/lib/action-errors";
 import { expenseTotals, IRPF_RATES } from "@/lib/fiscal/expenses";
 import { VAT_RATES } from "@/lib/fiscal/totals";
 import { formatCents, parseEurosToCents } from "@/lib/money";
+import type { OcrResult } from "@/lib/ocr/expense-extraction";
+import { normalizeTaxId } from "@/lib/tax-id";
 
 export interface SupplierOption {
   id: string;
@@ -32,6 +35,7 @@ export function ExpenseForm({ suppliers, defaultDate }: { suppliers: SupplierOpt
   const [vatRate, setVatRate] = useState(21);
   const [irpfRate, setIrpfRate] = useState(0);
   const [deductible, setDeductible] = useState(true);
+  const [ocrTotalCents, setOcrTotalCents] = useState<number | null>(null);
   const [result, setResult] = useState<ActionResult>({ error: null });
   const [pending, startTransition] = useTransition();
 
@@ -45,6 +49,28 @@ export function ExpenseForm({ suppliers, defaultDate }: { suppliers: SupplierOpt
     "aria-invalid": !!errors[key],
     "aria-describedby": errors[key] ? errId(key) : undefined,
   });
+
+  // Prefills every field the OCR could read and keeps the rest as they were.
+  function applyOcr({ prefill, check }: OcrResult) {
+    const match = prefill.supplierTaxId
+      ? suppliers.find((s) => normalizeTaxId(s.taxId) === prefill.supplierTaxId)
+      : undefined;
+    if (match) {
+      setSupplierMode("existing");
+      setSupplierId(match.id);
+    } else if (prefill.supplierName || prefill.supplierTaxId) {
+      setSupplierMode("new");
+      setNewSupplier({ name: prefill.supplierName, taxId: prefill.supplierTaxId });
+    }
+    if (prefill.date) setDate(prefill.date);
+    if (prefill.number) setNumber(prefill.number);
+    if (prefill.description) setDescription(prefill.description);
+    if (prefill.base) setBase(prefill.base);
+    if (prefill.vatRate !== null) setVatRate(prefill.vatRate);
+    if (prefill.irpfRate !== null) setIrpfRate(prefill.irpfRate);
+    setOcrTotalCents(check.totalCents);
+    setResult({ error: null });
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -60,6 +86,7 @@ export function ExpenseForm({ suppliers, defaultDate }: { suppliers: SupplierOpt
       vatRate,
       irpfRate,
       deductible,
+      source: ocrTotalCents === null ? ("MANUAL" as const) : ("OCR" as const),
     };
     startTransition(async () => {
       setResult(await createExpense(payload));
@@ -69,6 +96,8 @@ export function ExpenseForm({ suppliers, defaultDate }: { suppliers: SupplierOpt
   return (
     <form onSubmit={handleSubmit} noValidate className="grid gap-6 lg:grid-cols-[1fr_18rem] lg:items-start">
       <div className="grid min-w-0 gap-6">
+        <OcrUpload onResult={applyOcr} />
+
         <Card>
           <CardHeader>
             <CardTitle>Proveedor</CardTitle>
@@ -246,7 +275,18 @@ export function ExpenseForm({ suppliers, defaultDate }: { suppliers: SupplierOpt
             <dd className="text-right tabular-nums">−{formatCents(totals.irpfCents)}</dd>
             <dt className="border-t pt-2 font-semibold">Total a pagar</dt>
             <dd className="border-t pt-2 text-right font-semibold tabular-nums">{formatCents(totals.totalCents)}</dd>
+            {ocrTotalCents !== null && (
+              <>
+                <dt className="text-muted-foreground">Total en la factura</dt>
+                <dd className="text-right tabular-nums">{formatCents(ocrTotalCents)}</dd>
+              </>
+            )}
           </dl>
+          {ocrTotalCents !== null && Math.abs(ocrTotalCents - totals.totalCents) > 2 && (
+            <p role="alert" className="rounded-md border border-destructive p-3 text-sm text-destructive">
+              El total calculado no coincide con el de la factura. Revisa la base y los tipos de IVA e IRPF.
+            </p>
+          )}
           {totals.irpfCents > 0 && (
             <p className="rounded-md bg-muted p-3 text-sm">
               La retención de {formatCents(totals.irpfCents)} la ingresas tú en Hacienda con el Modelo 111.

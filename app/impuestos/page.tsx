@@ -1,14 +1,11 @@
 import Link from "next/link";
+import { connection } from "next/server";
 import { Suspense } from "react";
 import { PageHeader } from "@/components/page-header";
 import { TaxSummary } from "@/components/tax-summary";
 import { Button } from "@/components/ui/button";
-import { type Quarter, quarterOf, shiftQuarter } from "@/lib/fiscal/quarter";
-
-function currentQuarter(): Quarter {
-  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid" }).format(new Date());
-  return quarterOf(new Date(`${today}T00:00:00Z`));
-}
+import { currentQuarter } from "@/lib/dates";
+import { type Quarter, shiftQuarter } from "@/lib/fiscal/quarter";
 
 // Falls back to the current quarter when the query string is missing or malformed.
 function parseQuarter(params: { year?: string | string[]; q?: string | string[] }): Quarter {
@@ -24,6 +21,8 @@ const href = ({ year, quarter }: Quarter) => `/impuestos?year=${year}&q=${quarte
 const label = ({ year, quarter }: Quarter) => `${quarter}T ${year}`;
 
 async function QuarterTaxes({ searchParams }: { searchParams: PageProps<"/impuestos">["searchParams"] }) {
+  // The default quarter depends on today's date, so this must render at request time.
+  await connection();
   const quarter = parseQuarter(await searchParams);
   const prev = shiftQuarter(quarter, -1);
   const next = shiftQuarter(quarter, 1);
