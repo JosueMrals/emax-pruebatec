@@ -1,17 +1,13 @@
 import { z } from "zod";
 import { isEuCountry, isEuVatNumber } from "@/lib/fiscal/operations";
 import { VAT_RATES } from "@/lib/fiscal/totals";
-
-const taxId = z
-  .string()
-  .transform((s) => s.replace(/[\s.-]/g, "").toUpperCase())
-  .pipe(z.string().regex(/^[0-9A-Z]{5,14}$/, { error: "Introduce un NIF o NIF-IVA válido" }));
+import { taxIdSchema } from "./common";
 
 const newClient = z
   .object({
     mode: z.literal("new"),
     name: z.string().trim().min(2, { error: "Introduce el nombre del cliente" }).max(200),
-    taxId,
+    taxId: taxIdSchema,
     countryCode: z.string().refine(isEuCountry, { error: "Elige un país de la UE" }),
     email: z.union([z.literal(""), z.email({ error: "Email no válido" })]),
   })
@@ -38,15 +34,3 @@ export const invoiceInputSchema = z.object({
   lines: z.array(line).min(1, { error: "Añade al menos una línea" }).max(50),
   notes: z.string().trim().max(1000),
 });
-
-export type InvoiceInput = z.input<typeof invoiceInputSchema>;
-
-// Maps issues to "client.taxId" / "lines.0.quantity" style keys the form can look up.
-export function fieldErrorsFrom(error: z.ZodError): Record<string, string> {
-  const errors: Record<string, string> = {};
-  for (const issue of error.issues) {
-    const key = issue.path.join(".");
-    errors[key] ??= issue.message;
-  }
-  return errors;
-}

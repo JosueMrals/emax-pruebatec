@@ -3,25 +3,15 @@
 import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { type ActionResult, isUniqueViolation, UserFacingError } from "@/lib/action-errors";
 import { db } from "@/lib/db";
-import { Prisma } from "@/lib/generated/prisma/client";
+import type { Prisma } from "@/lib/generated/prisma/client";
 import { isEuVatNumber, operationTypeFor } from "@/lib/fiscal/operations";
 import { invoiceTotals } from "@/lib/fiscal/totals";
-import { fieldErrorsFrom, invoiceInputSchema } from "@/lib/validation/invoice";
-
-export type ActionResult = { error: string | null; fieldErrors?: Record<string, string> };
+import { fieldErrorsFrom } from "@/lib/validation/common";
+import { invoiceInputSchema } from "@/lib/validation/invoice";
 
 const MAX_INT4 = 2_147_483_647;
-
-class UserFacingError extends Error {}
-
-function isUniqueViolation(e: unknown, field: string) {
-  return (
-    e instanceof Prisma.PrismaClientKnownRequestError &&
-    e.code === "P2002" &&
-    JSON.stringify(e.meta ?? {}).includes(field)
-  );
-}
 
 async function nextInvoiceNumber(tx: Prisma.TransactionClient, year: number) {
   const prefix = `F-${year}-`;

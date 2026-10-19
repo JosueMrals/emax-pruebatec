@@ -22,11 +22,15 @@ export interface InvoiceTotals {
   totalCents: number;
 }
 
+export function percentOf(cents: number, rate: number): number {
+  return Math.round((cents * rate) / 100);
+}
+
 // Intra-community services carry 0 % VAT (reverse charge), whatever rate the line had.
 export function lineTotals(line: LineInput, operationType: OperationType): LineTotals {
   const baseCents = line.quantity * line.unitPriceCents;
   const vatRate = operationType === "INTRA_SERVICIOS" ? 0 : line.vatRate;
-  return { baseCents, vatRate, vatCents: Math.round((baseCents * vatRate) / 100) };
+  return { baseCents, vatRate, vatCents: percentOf(baseCents, vatRate) };
 }
 
 export function invoiceTotals(lines: LineInput[], operationType: OperationType): InvoiceTotals {

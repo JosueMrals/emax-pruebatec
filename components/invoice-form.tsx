@@ -1,7 +1,8 @@
 "use client";
 
 import { useId, useRef, useState, useTransition } from "react";
-import { createInvoice, type ActionResult } from "@/actions/invoices";
+import { createInvoice } from "@/actions/invoices";
+import { FieldError } from "@/components/field-error";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +12,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Textarea } from "@/components/ui/textarea";
 import { EU_COUNTRIES, operationTypeFor } from "@/lib/fiscal/operations";
 import { invoiceTotals, VAT_RATES } from "@/lib/fiscal/totals";
+import type { ActionResult } from "@/lib/action-errors";
 import { formatCents, parseEurosToCents } from "@/lib/money";
 
 export interface ClientOption {
@@ -26,15 +28,6 @@ interface LineState {
   quantity: string;
   price: string;
   vatRate: number;
-}
-
-function FieldError({ id, message }: { id: string; message?: string }) {
-  if (!message) return null;
-  return (
-    <p id={id} className="text-sm text-destructive">
-      {message}
-    </p>
-  );
 }
 
 export function InvoiceForm({ clients, defaultDate }: { clients: ClientOption[]; defaultDate: string }) {
