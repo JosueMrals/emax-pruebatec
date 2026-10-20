@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
-import { NavLinks } from "@/components/nav-links";
+import { Suspense } from "react";
+import { CompanySwitcher } from "@/components/company-switcher";
+import { NavLinkList, NavLinks } from "@/components/nav-links";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -24,17 +26,23 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="es" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">
         <header className="border-b">
-          <nav
-            aria-label="Principal"
-            className="mx-auto flex w-full max-w-5xl flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-          >
-            <Link href="/" className="text-lg font-semibold tracking-tight">
-              EnerFactura
-            </Link>
-            <NavLinks />
-          </nav>
+          <div className="mx-auto grid w-full max-w-6xl gap-2 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Link href="/" className="text-lg font-semibold tracking-tight">
+                EnerFactura
+              </Link>
+              <Suspense fallback={null}>
+                <CompanySwitcher />
+              </Suspense>
+            </div>
+            <nav aria-label="Principal">
+              <Suspense fallback={<NavLinkList pathname={null} />}>
+                <NavLinks />
+              </Suspense>
+            </nav>
+          </div>
         </header>
-        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">{children}</main>
       </body>
     </html>
   );

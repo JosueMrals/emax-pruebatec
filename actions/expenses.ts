@@ -2,13 +2,17 @@
 
 import { redirect } from "next/navigation";
 import { type ActionResult, isUniqueViolation, UserFacingError } from "@/lib/action-errors";
+import { getActiveCompany } from "@/lib/company";
+import { linkMovement } from "@/lib/bank/link";
 import { db } from "@/lib/db";
 import { expenseTotals } from "@/lib/fiscal/expenses";
-import { fieldErrorsFrom } from "@/lib/validation/common";
+import { fieldErrorsFrom, fromMovementSchema } from "@/lib/validation/common";
 import { expenseInputSchema } from "@/lib/validation/expense";
 
 export async function createExpense(input: unknown): Promise<ActionResult> {
-  const parsed = expenseInputSchema.safeParse(input);
+  const company = await getActiveCompany();
+  if (!company) return { error: "Configura tu empresa antes de continuar." };
+  const parsed = expenseInputSchema.extend(fromMovementSchema.shape).safeParse(input);
   if (!parsed.success) {
     return { error: "Revisa los campos marcados.", fieldErrors: fieldErrorsFrom(parsed.error) };
   }
@@ -21,12 +25,15 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
     await db.$transaction(async (tx) => {
       const supplier =
         data.supplier.mode === "existing"
-          ? await tx.supplier.findUnique({ where: { id: data.supplier.id } })
-          : await tx.supplier.create({ data: { name: data.supplier.name, taxId: data.supplier.taxId } });
+          ? await tx.supplier.findFirst({ where: { id: data.supplier.id, companyId: company.id } })
+          : await tx.supplier.create({
+              data: { companyId: company.id, name: data.supplier.name, taxId: data.supplier.taxId },
+            });
       if (!supplier) throw new UserFacingError("El proveedor seleccionado ya no existe.");
 
-      await tx.expense.create({
+      const expense = await tx.expense.create({
         data: {
+          companyId: company.id,
           supplierId: supplier.id,
           date: new Date(`${data.date}T00:00:00.000Z`),
           number: data.number || null,
@@ -38,6 +45,10 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
           ...totals,
         },
       });
+      // Created from a bank payment: reconcile in the same transaction, or save nothing.
+      if (data.movementId) {
+        await linkMovement(tx, company.id, data.movementId, { type: "expense", id: expense.id, totalCents: expense.totalCents });
+      }
     });
   } catch (e) {
     if (e instanceof UserFacingError) return { error: e.message };
@@ -51,5 +62,9 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
     return { error: "No se pudo guardar el gasto. Inténtalo de nuevo." };
   }
 
-  redirect("/gastos");
+  redirect(
+    data.movementId
+      ? `/banco/conciliacion?conciliado=${encodeURIComponent(`Gasto de ${data.description}`)}`
+      : "/gastos",
+  );
 }

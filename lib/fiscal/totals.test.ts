@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { invoiceTotals } from "./totals";
+import { invoiceTotals, vatBreakdown } from "./totals";
 import { isEuVatNumber, operationTypeFor } from "./operations";
 
 test("caso A: factura nacional, base 1.000 € al 21 % → total 1.210 €", () => {
@@ -44,4 +44,19 @@ test("NIF-IVA: prefijo del país obligatorio, Grecia usa EL", () => {
   assert.equal(isEuVatNumber("123456789", "DE"), false);
   assert.equal(isEuVatNumber("FR123456789", "DE"), false);
   assert.equal(isEuVatNumber("EL123456789", "GR"), true);
+});
+
+test("desglose de IVA por tipo, de mayor a menor", () => {
+  const t = invoiceTotals(
+    [
+      { quantity: 1, unitPriceCents: 10_000, vatRate: 10 },
+      { quantity: 2, unitPriceCents: 5_000, vatRate: 21 },
+      { quantity: 1, unitPriceCents: 3_000, vatRate: 10 },
+    ],
+    "NACIONAL",
+  );
+  assert.deepEqual(vatBreakdown(t.lines), [
+    { vatRate: 21, baseCents: 10_000, vatCents: 2_100 },
+    { vatRate: 10, baseCents: 13_000, vatCents: 1_300 },
+  ]);
 });

@@ -1,10 +1,10 @@
 import { connection } from "next/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { db } from "@/lib/db";
-import { modelo111, modelo303, modelo349 } from "@/lib/fiscal/models";
-import { type Quarter, quarterRange } from "@/lib/fiscal/quarter";
+import { requireCompany } from "@/lib/company";
+import type { Quarter } from "@/lib/fiscal/quarter";
 import { formatCents } from "@/lib/money";
+import { loadQuarterTaxes } from "@/lib/taxes";
 
 function Row({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (
@@ -17,32 +17,14 @@ function Row({ label, value, strong }: { label: string; value: string; strong?: 
 
 export async function TaxSummary({ quarter }: { quarter: Quarter }) {
   await connection();
-  const { start, end } = quarterRange(quarter);
-  const [invoices, expenses] = await Promise.all([
-    db.invoice.findMany({
-      where: { issueDate: { gte: start, lt: end } },
-      select: {
-        operationType: true,
-        baseCents: true,
-        vatCents: true,
-        client: { select: { name: true, taxId: true, countryCode: true } },
-      },
-    }),
-    db.expense.findMany({
-      where: { date: { gte: start, lt: end } },
-      select: { supplierId: true, baseCents: true, vatCents: true, irpfCents: true, deductible: true },
-    }),
-  ]);
-
-  const m303 = modelo303(invoices, expenses);
-  const m111 = modelo111(expenses);
-  const m349 = modelo349(invoices);
+  const company = await requireCompany();
+  const { invoiceCount, expenseCount, m303, m111, m349 } = await loadQuarterTaxes(company.id, quarter);
 
   return (
     <div className="grid gap-6">
       <p className="text-sm text-muted-foreground">
-        {invoices.length} {invoices.length === 1 ? "factura emitida" : "facturas emitidas"} · {expenses.length}{" "}
-        {expenses.length === 1 ? "gasto" : "gastos"} en el trimestre.
+        {invoiceCount} {invoiceCount === 1 ? "factura emitida" : "facturas emitidas"} · {expenseCount}{" "}
+        {expenseCount === 1 ? "gasto" : "gastos"} en el trimestre.
       </p>
 
       <div className="grid gap-6 md:grid-cols-2">

@@ -42,6 +42,9 @@ async function QuarterTaxes({ searchParams }: { searchParams: PageProps<"/impues
           </Link>
         </Button>
       </nav>
+      <Button asChild variant="secondary" className="justify-self-start">
+        <a href={`/impuestos/pdf?year=${quarter.year}&q=${quarter.quarter}`}>Descargar PDF del {label(quarter)}</a>
+      </Button>
       <TaxSummary quarter={quarter} />
     </div>
   );

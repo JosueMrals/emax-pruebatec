@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { MarkPaidButton } from "@/components/mark-paid-button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { requireCompany } from "@/lib/company";
 import { currentQuarter, dateFormat } from "@/lib/dates";
 import { db } from "@/lib/db";
 import { quarterRange } from "@/lib/fiscal/quarter";
@@ -22,20 +23,30 @@ function Stat({ title, value, detail, tone }: { title: string; value: string; de
 
 export async function DashboardSummary() {
   await connection();
+  const company = await requireCompany();
   const quarter = currentQuarter();
   const { start, end } = quarterRange(quarter);
 
-  const [income, expenses, pending, pendingInvoices] = await Promise.all([
-    db.invoice.aggregate({ where: { issueDate: { gte: start, lt: end } }, _sum: { baseCents: true }, _count: true }),
-    db.expense.aggregate({ where: { date: { gte: start, lt: end } }, _sum: { baseCents: true }, _count: true }),
-    db.invoice.aggregate({ where: { status: "PENDIENTE" }, _sum: { totalCents: true }, _count: true }),
+  const [income, expenses, pending, pendingInvoices, accounts, movementSum, unreconciled, openQuotes] = await Promise.all([
+    db.invoice.aggregate({ where: { companyId: company.id, issueDate: { gte: start, lt: end } }, _sum: { baseCents: true }, _count: true }),
+    db.expense.aggregate({ where: { companyId: company.id, date: { gte: start, lt: end } }, _sum: { baseCents: true }, _count: true }),
+    db.invoice.aggregate({ where: { companyId: company.id, status: "PENDIENTE" }, _sum: { totalCents: true }, _count: true }),
     db.invoice.findMany({
-      where: { status: "PENDIENTE" },
+      where: { companyId: company.id, status: "PENDIENTE" },
       select: { id: true, number: true, issueDate: true, totalCents: true, client: { select: { name: true } } },
       orderBy: [{ issueDate: "asc" }, { number: "asc" }],
       take: 5,
     }),
+    db.bankAccount.aggregate({ where: { companyId: company.id }, _sum: { openingBalanceCents: true }, _count: true }),
+    db.bankMovement.aggregate({ where: { account: { companyId: company.id } }, _sum: { amountCents: true } }),
+    db.bankMovement.count({ where: { account: { companyId: company.id }, invoiceId: null, expenseId: null } }),
+    db.quote.aggregate({
+      where: { companyId: company.id, status: { in: ["BORRADOR", "ENVIADO", "ACEPTADO"] } },
+      _sum: { totalCents: true },
+      _count: true,
+    }),
   ]);
+  const bankBalanceCents = (accounts._sum.openingBalanceCents ?? 0) + (movementSum._sum.amountCents ?? 0);
 
   const incomeCents = income._sum.baseCents ?? 0;
   const expensesCents = expenses._sum.baseCents ?? 0;
@@ -66,6 +77,31 @@ export async function DashboardSummary() {
           value={formatCents(pending._sum.totalCents ?? 0)}
           detail={`${pending._count} ${pending._count === 1 ? "factura" : "facturas"} · total con IVA`}
         />
+      </section>
+
+      <section aria-label="Tesorería y presupuestos" className="grid gap-4 sm:grid-cols-3">
+        <Link href="/banco" className="rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+          <Stat
+            title="Saldo en bancos"
+            value={formatCents(bankBalanceCents)}
+            detail={`${accounts._count} ${accounts._count === 1 ? "cuenta" : "cuentas"}`}
+            tone={bankBalanceCents < 0 ? "negative" : undefined}
+          />
+        </Link>
+        <Link href="/banco/conciliacion" className="rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+          <Stat
+            title="Movimientos sin conciliar"
+            value={String(unreconciled)}
+            detail={unreconciled ? "Revisa la conciliación" : "Todo conciliado"}
+          />
+        </Link>
+        <Link href="/presupuestos" className="rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+          <Stat
+            title="Presupuestos abiertos"
+            value={formatCents(openQuotes._sum.totalCents ?? 0)}
+            detail={`${openQuotes._count} sin facturar ni rechazar`}
+          />
+        </Link>
       </section>
 
       <Card>

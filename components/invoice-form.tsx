@@ -2,6 +2,8 @@
 
 import { useId, useRef, useState, useTransition } from "react";
 import { createInvoice } from "@/actions/invoices";
+import { createQuote } from "@/actions/quotes";
+import { BankMovementNotice, BankTotalCheck } from "@/components/bank-target";
 import { FieldError } from "@/components/field-error";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -13,7 +15,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { EU_COUNTRIES, operationTypeFor } from "@/lib/fiscal/operations";
 import { invoiceTotals, VAT_RATES } from "@/lib/fiscal/totals";
 import type { ActionResult } from "@/lib/action-errors";
-import { formatCents, parseEurosToCents } from "@/lib/money";
+import type { MovementPrefill } from "@/lib/bank/movement-prefill";
+import { solveBaseForTotal } from "@/lib/fiscal/solve-base";
+import { centsToInput, formatCents, parseEurosToCents } from "@/lib/money";
 
 export interface ClientOption {
   id: string;
@@ -30,15 +34,39 @@ interface LineState {
   vatRate: number;
 }
 
-export function InvoiceForm({ clients, defaultDate }: { clients: ClientOption[]; defaultDate: string }) {
+// Shared by invoices and quotes: same client, lines and live totals; quotes add a validity date.
+export function InvoiceForm({
+  clients,
+  defaultDate,
+  kind = "invoice",
+  fromMovement,
+  defaultClientId = "",
+}: {
+  clients: ClientOption[];
+  defaultDate: string;
+  kind?: "invoice" | "quote";
+  // Bank collection this invoice is created from: prefills it and reconciles it on save.
+  fromMovement?: MovementPrefill;
+  defaultClientId?: string;
+}) {
+  const isQuote = kind === "quote";
   const uid = useId();
   const nextKey = useRef(1);
   const [clientMode, setClientMode] = useState<"existing" | "new">(clients.length ? "existing" : "new");
-  const [clientId, setClientId] = useState("");
+  const [clientId, setClientId] = useState(defaultClientId);
   const [newClient, setNewClient] = useState({ name: "", taxId: "", countryCode: "ES", email: "" });
-  const [issueDate, setIssueDate] = useState(defaultDate);
-  const [lines, setLines] = useState<LineState[]>([{ key: 0, description: "", quantity: "1", price: "", vatRate: 21 }]);
+  const [issueDate, setIssueDate] = useState(fromMovement?.date ?? defaultDate);
+  const [lines, setLines] = useState<LineState[]>(() => [
+    {
+      key: 0,
+      description: fromMovement?.description ?? "",
+      quantity: "1",
+      price: fromMovement ? centsToInput(unitPriceForTotal(fromMovement.amountCents, 1, 21, "NACIONAL").baseCents) : "",
+      vatRate: 21,
+    },
+  ]);
   const [notes, setNotes] = useState("");
+  const [validUntil, setValidUntil] = useState("");
   const [result, setResult] = useState<ActionResult>({ error: null });
   const [pending, startTransition] = useTransition();
 
@@ -72,6 +100,15 @@ export function InvoiceForm({ clients, defaultDate }: { clients: ClientOption[];
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   }
 
+  // Recomputes the single line's unit price so the total equals the bank amount.
+  function adjustToBank(): boolean {
+    if (!fromMovement || lines.length !== 1) return false;
+    const quantity = Number.isNaN(parsedLines[0].quantity) || parsedLines[0].quantity < 1 ? 1 : parsedLines[0].quantity;
+    const { baseCents, exact } = unitPriceForTotal(fromMovement.amountCents, quantity, lines[0].vatRate, operationType);
+    updateLine(lines[0].key, { quantity: String(quantity), price: centsToInput(baseCents) });
+    return exact;
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const payload = {
@@ -87,15 +124,17 @@ export function InvoiceForm({ clients, defaultDate }: { clients: ClientOption[];
         vatRate: l.vatRate,
       })),
       notes,
+      movementId: fromMovement?.id ?? "",
     };
     startTransition(async () => {
-      setResult(await createInvoice(payload));
+      setResult(isQuote ? await createQuote({ ...payload, validUntil }) : await createInvoice(payload));
     });
   }
 
   return (
     <form onSubmit={handleSubmit} noValidate className="grid gap-6 lg:grid-cols-[1fr_18rem] lg:items-start">
       <div className="grid min-w-0 gap-6">
+        {fromMovement && <BankMovementNotice movement={fromMovement} kind="invoice" />}
         <Card>
           <CardHeader>
             <CardTitle>Cliente</CardTitle>
@@ -196,8 +235,9 @@ export function InvoiceForm({ clients, defaultDate }: { clients: ClientOption[];
               </div>
             )}
 
-            <div className="grid gap-2 sm:max-w-48">
-              <Label htmlFor={`${uid}-date`}>Fecha de emisión</Label>
+            <div className="flex flex-wrap gap-4">
+            <div className="grid gap-2 sm:w-48">
+              <Label htmlFor={`${uid}-date`}>{isQuote ? "Fecha del presupuesto" : "Fecha de emisión"}</Label>
               <Input
                 id={`${uid}-date`}
                 type="date"
@@ -206,6 +246,20 @@ export function InvoiceForm({ clients, defaultDate }: { clients: ClientOption[];
                 {...a11y("issueDate")}
               />
               <FieldError id={errId("issueDate")} message={errors.issueDate} />
+            </div>
+            {isQuote && (
+              <div className="grid gap-2 sm:w-48">
+                <Label htmlFor={`${uid}-valid`}>Válido hasta (opcional)</Label>
+                <Input
+                  id={`${uid}-valid`}
+                  type="date"
+                  value={validUntil}
+                  onChange={(e) => setValidUntil(e.target.value)}
+                  {...a11y("validUntil")}
+                />
+                <FieldError id={errId("validUntil")} message={errors.validUntil} />
+              </div>
+            )}
             </div>
           </CardContent>
         </Card>
@@ -324,6 +378,13 @@ export function InvoiceForm({ clients, defaultDate }: { clients: ClientOption[];
             <dt className="border-t pt-2 font-semibold">Total</dt>
             <dd className="border-t pt-2 text-right font-semibold tabular-nums">{formatCents(totals.totalCents)}</dd>
           </dl>
+          {fromMovement && (
+            <BankTotalCheck
+              targetCents={fromMovement.amountCents}
+              totalCents={totals.totalCents}
+              onAdjust={lines.length === 1 ? adjustToBank : null}
+            />
+          )}
           {intra && (
             <p className="rounded-md bg-muted p-3 text-sm">
               Servicio intracomunitario: IVA 0 % por inversión del sujeto pasivo. Se incluirá en el Modelo 349 con
@@ -336,10 +397,22 @@ export function InvoiceForm({ clients, defaultDate }: { clients: ClientOption[];
             </Alert>
           )}
           <Button type="submit" size="lg" disabled={pending}>
-            {pending ? "Guardando…" : "Guardar factura"}
+            {pending ? "Guardando…" : isQuote ? "Guardar presupuesto" : "Guardar factura"}
           </Button>
         </CardContent>
       </Card>
     </form>
+  );
+}
+
+function unitPriceForTotal(
+  totalCents: number,
+  quantity: number,
+  vatRate: number,
+  operationType: "NACIONAL" | "INTRA_SERVICIOS",
+) {
+  return solveBaseForTotal(
+    totalCents,
+    (unitPriceCents) => invoiceTotals([{ quantity, unitPriceCents, vatRate }], operationType).totalCents,
   );
 }

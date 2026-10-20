@@ -21,6 +21,9 @@ const existingClient = z.object({
   id: z.uuid({ error: "Elige un cliente" }),
 });
 
+const salesClient = z.discriminatedUnion("mode", [existingClient, newClient]);
+export type SalesClientInput = z.infer<typeof salesClient>;
+
 const line = z.object({
   description: z.string().trim().min(1, { error: "Describe el concepto" }).max(500),
   quantity: z.int({ error: "Cantidad entera" }).min(1, { error: "Mínimo 1" }).max(10_000),
@@ -29,8 +32,15 @@ const line = z.object({
 });
 
 export const invoiceInputSchema = z.object({
-  client: z.discriminatedUnion("mode", [existingClient, newClient]),
+  client: salesClient,
   issueDate: z.iso.date({ error: "Fecha no válida" }),
   lines: z.array(line).min(1, { error: "Añade al menos una línea" }).max(50),
   notes: z.string().trim().max(1000),
 });
+
+export const quoteInputSchema = invoiceInputSchema
+  .extend({ validUntil: z.union([z.literal(""), z.iso.date({ error: "Fecha no válida" })]) })
+  .refine((q) => !q.validUntil || q.validUntil >= q.issueDate, {
+    path: ["validUntil"],
+    error: "La validez no puede ser anterior a la fecha del presupuesto",
+  });

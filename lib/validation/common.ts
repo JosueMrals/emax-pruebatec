@@ -14,3 +14,6 @@ export function fieldErrorsFrom(error: z.ZodError): Record<string, string> {
   }
   return errors;
 }
+
+// Optional bank movement a new invoice or expense is created from (reconciled on save).
+export const fromMovementSchema = z.object({ movementId: z.union([z.literal(""), z.uuid()]).optional() });

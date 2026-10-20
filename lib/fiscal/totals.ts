@@ -39,3 +39,15 @@ export function invoiceTotals(lines: LineInput[], operationType: OperationType):
   const vatCents = computed.reduce((sum, l) => sum + l.vatCents, 0);
   return { lines: computed, baseCents, vatCents, totalCents: baseCents + vatCents };
 }
+
+// Spanish invoices must show base and VAT per rate; sums the stored line amounts per rate, highest first.
+export function vatBreakdown(lines: LineTotals[]): LineTotals[] {
+  const byRate = new Map<number, LineTotals>();
+  for (const l of lines) {
+    const row = byRate.get(l.vatRate) ?? { vatRate: l.vatRate, baseCents: 0, vatCents: 0 };
+    row.baseCents += l.baseCents;
+    row.vatCents += l.vatCents;
+    byRate.set(l.vatRate, row);
+  }
+  return [...byRate.values()].sort((a, b) => b.vatRate - a.vatRate);
+}

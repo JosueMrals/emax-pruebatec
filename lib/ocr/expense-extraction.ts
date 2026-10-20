@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { IRPF_RATES, totalMismatchCents } from "@/lib/fiscal/expenses";
 import { percentOf, VAT_RATES } from "@/lib/fiscal/totals";
+import { centsToInput } from "@/lib/money";
 import { normalizeTaxId } from "@/lib/tax-id";
 
 // Shape Claude must return (structured output). Amounts in euros exactly as printed; null when not visible.
@@ -57,8 +58,6 @@ export interface OcrResult {
 }
 
 const toCents = (euros: number | null) => (euros === null ? null : Math.round(euros * 100));
-
-const centsToInput = (cents: number) => `${Math.trunc(cents / 100)},${String(cents % 100).padStart(2, "0")}`;
 
 // Uses the printed rate if allowed; otherwise infers it from the amounts when they match a valid rate.
 function resolveRate(

@@ -17,36 +17,86 @@ enum InvoiceStatus {
   COBRADA
 }
 
+enum QuoteStatus {
+  BORRADOR
+  ENVIADO
+  ACEPTADO
+  RECHAZADO
+  FACTURADO
+}
+
 enum ExpenseSource {
   MANUAL
   OCR
 }
 
+// Every business record belongs to one company; queries are always scoped by companyId.
+model Company {
+  id            String        @id @default(uuid()) @db.Uuid
+  name          String
+  taxId         String
+  address       String?
+  city          String?
+  postalCode    String?
+  email         String?
+  iban          String?
+  invoicePrefix String        @default("F")
+  quotePrefix   String        @default("P")
+  createdAt     DateTime      @default(now())
+  clients       Client[]
+  suppliers     Supplier[]
+  invoices      Invoice[]
+  quotes        Quote[]
+  expenses      Expense[]
+  bankAccounts  BankAccount[]
+}
+
 // taxId: NIF for Spanish contacts, NIF-IVA (country prefix) for EU contacts.
 model Client {
   id          String    @id @default(uuid()) @db.Uuid
+  companyId   String    @db.Uuid
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   name        String
-  taxId       String    @unique
+  taxId       String
   countryCode String    @default("ES") @db.Char(2)
   email       String?
+  phone       String?
   address     String?
+  city        String?
+  postalCode  String?
+  notes       String?
   createdAt   DateTime  @default(now())
   invoices    Invoice[]
+  quotes      Quote[]
+
+  @@unique([companyId, taxId])
 }
 
 model Supplier {
   id          String    @id @default(uuid()) @db.Uuid
+  companyId   String    @db.Uuid
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   name        String
-  taxId       String    @unique
+  taxId       String
   countryCode String    @default("ES") @db.Char(2)
+  email       String?
+  phone       String?
+  address     String?
+  city        String?
+  postalCode  String?
+  notes       String?
   createdAt   DateTime  @default(now())
   expenses    Expense[]
+
+  @@unique([companyId, taxId])
 }
 
 // Amounts are integer cents; totals are computed by lib/fiscal and stored for summaries.
 model Invoice {
   id            String        @id @default(uuid()) @db.Uuid
-  number        String        @unique
+  companyId     String        @db.Uuid
+  company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  number        String
   issueDate     DateTime      @db.Date
   operationType OperationType @default(NACIONAL)
   clientId      String        @db.Uuid
@@ -59,9 +109,12 @@ model Invoice {
   notes         String?
   createdAt     DateTime      @default(now())
   lines         InvoiceLine[]
+  quote         Quote?
+  bankMovement  BankMovement?
 
+  @@unique([companyId, number])
+  @@index([companyId, issueDate])
   @@index([clientId])
-  @@index([issueDate])
 }
 
 model InvoiceLine {
@@ -78,23 +131,98 @@ model InvoiceLine {
   @@index([invoiceId])
 }
 
-model Expense {
-  id          String        @id @default(uuid()) @db.Uuid
-  number      String?
-  date        DateTime      @db.Date
-  description String
-  supplierId  String        @db.Uuid
-  supplier    Supplier      @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  baseCents   Int
-  vatRate     Int
-  vatCents    Int
-  irpfRate    Int           @default(0)
-  irpfCents   Int           @default(0)
-  totalCents  Int // base + IVA - IRPF
-  deductible  Boolean       @default(true)
-  source      ExpenseSource @default(MANUAL)
-  createdAt   DateTime      @default(now())
+model Quote {
+  id            String        @id @default(uuid()) @db.Uuid
+  companyId     String        @db.Uuid
+  company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  number        String
+  issueDate     DateTime      @db.Date
+  validUntil    DateTime?     @db.Date
+  operationType OperationType @default(NACIONAL)
+  clientId      String        @db.Uuid
+  client        Client        @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  baseCents     Int
+  vatCents      Int
+  totalCents    Int
+  status        QuoteStatus   @default(BORRADOR)
+  notes         String?
+  invoiceId     String?       @unique @db.Uuid
+  invoice       Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  createdAt     DateTime      @default(now())
+  lines         QuoteLine[]
 
+  @@unique([companyId, number])
+  @@index([companyId, issueDate])
+  @@index([clientId])
+}
+
+model QuoteLine {
+  id             String @id @default(uuid()) @db.Uuid
+  quoteId        String @db.Uuid
+  quote          Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  description    String
+  quantity       Int    @default(1)
+  unitPriceCents Int
+  vatRate        Int
+  baseCents      Int
+  vatCents       Int
+
+  @@index([quoteId])
+}
+
+model Expense {
+  id           String        @id @default(uuid()) @db.Uuid
+  companyId    String        @db.Uuid
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  number       String?
+  date         DateTime      @db.Date
+  description  String
+  supplierId   String        @db.Uuid
+  supplier     Supplier      @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  baseCents    Int
+  vatRate      Int
+  vatCents     Int
+  irpfRate     Int           @default(0)
+  irpfCents    Int           @default(0)
+  totalCents   Int // base + IVA - IRPF
+  deductible   Boolean       @default(true)
+  source       ExpenseSource @default(MANUAL)
+  createdAt    DateTime      @default(now())
+  bankMovement BankMovement?
+
+  @@index([companyId, date])
   @@index([supplierId])
-  @@index([date])
+}
+
+model BankAccount {
+  id                  String         @id @default(uuid()) @db.Uuid
+  companyId           String         @db.Uuid
+  company             Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name                String
+  iban                String?
+  openingBalanceCents Int            @default(0)
+  createdAt           DateTime       @default(now())
+  movements           BankMovement[]
+
+  @@index([companyId])
+}
+
+// amountCents is signed: positive = money in, negative = money out.
+// A movement reconciles with at most one invoice (collection) or one expense (payment).
+model BankMovement {
+  id          String      @id @default(uuid()) @db.Uuid
+  accountId   String      @db.Uuid
+  account     BankAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  date        DateTime    @db.Date
+  description String
+  amountCents Int
+  importHash  String?
+  invoiceId   String?     @unique @db.Uuid
+  invoice     Invoice?    @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  expenseId   String?     @unique @db.Uuid
+  expense     Expense?    @relation(fields: [expenseId], references: [id], onDelete: SetNull)
+  createdAt   DateTime    @default(now())
+
+  @@unique([accountId, importHash])
+  @@index([accountId, date])
 }

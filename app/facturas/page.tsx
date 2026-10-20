@@ -4,7 +4,7 @@ import { InvoiceList } from "@/components/invoice-list";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 
-export default function FacturasPage() {
+export default function FacturasPage({ searchParams }: PageProps<"/facturas">) {
   return (
     <>
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -14,7 +14,7 @@ export default function FacturasPage() {
         </Button>
       </div>
       <Suspense fallback={<p className="text-sm text-muted-foreground">Cargando facturas…</p>}>
-        <InvoiceList />
+        <InvoiceList searchParams={searchParams} />
       </Suspense>
     </>
   );

@@ -3,62 +3,35 @@
 import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { type ActionResult, isUniqueViolation, UserFacingError } from "@/lib/action-errors";
+import type { ActionResult } from "@/lib/action-errors";
+import { getActiveCompany } from "@/lib/company";
+import { linkMovement } from "@/lib/bank/link";
 import { db } from "@/lib/db";
-import type { Prisma } from "@/lib/generated/prisma/client";
-import { isEuVatNumber, operationTypeFor } from "@/lib/fiscal/operations";
-import { invoiceTotals } from "@/lib/fiscal/totals";
-import { fieldErrorsFrom } from "@/lib/validation/common";
+import { computeSalesDocument, linesData, nextInvoiceNumber, resolveClient, salesErrorResult } from "@/lib/sales";
+import { fieldErrorsFrom, fromMovementSchema } from "@/lib/validation/common";
 import { invoiceInputSchema } from "@/lib/validation/invoice";
 
-const MAX_INT4 = 2_147_483_647;
-
-async function nextInvoiceNumber(tx: Prisma.TransactionClient, year: number) {
-  const prefix = `F-${year}-`;
-  const last = await tx.invoice.findFirst({
-    where: { number: { startsWith: prefix } },
-    orderBy: { number: "desc" },
-    select: { number: true },
-  });
-  const seq = last ? Number(last.number.slice(prefix.length)) + 1 : 1;
-  return `${prefix}${String(seq).padStart(4, "0")}`;
-}
+const NO_COMPANY: ActionResult = { error: "Configura tu empresa antes de continuar." };
 
 export async function createInvoice(input: unknown): Promise<ActionResult> {
-  const parsed = invoiceInputSchema.safeParse(input);
+  const company = await getActiveCompany();
+  if (!company) return NO_COMPANY;
+  const parsed = invoiceInputSchema.extend(fromMovementSchema.shape).safeParse(input);
   if (!parsed.success) {
     return { error: "Revisa los campos marcados.", fieldErrors: fieldErrorsFrom(parsed.error) };
   }
   const data = parsed.data;
   const issueDate = new Date(`${data.issueDate}T00:00:00.000Z`);
 
+  let number = "";
   try {
     await db.$transaction(async (tx) => {
-      const client =
-        data.client.mode === "existing"
-          ? await tx.client.findUnique({ where: { id: data.client.id } })
-          : await tx.client.create({
-              data: {
-                name: data.client.name,
-                taxId: data.client.taxId,
-                countryCode: data.client.countryCode,
-                email: data.client.email || null,
-              },
-            });
-      if (!client) throw new UserFacingError("El cliente seleccionado ya no existe.");
-
-      const operationType = operationTypeFor(client.countryCode);
-      if (operationType === "INTRA_SERVICIOS" && !isEuVatNumber(client.taxId, client.countryCode)) {
-        throw new UserFacingError("El cliente no tiene un NIF-IVA válido para una operación intracomunitaria.");
-      }
-
-      // Totals are always recomputed here; the form's figures are only a preview.
-      const totals = invoiceTotals(data.lines, operationType);
-      if (totals.totalCents > MAX_INT4) throw new UserFacingError("El importe total es demasiado alto.");
-
-      await tx.invoice.create({
+      const client = await resolveClient(tx, company.id, data.client);
+      const { operationType, totals } = computeSalesDocument(client, data.lines);
+      const invoice = await tx.invoice.create({
         data: {
-          number: await nextInvoiceNumber(tx, issueDate.getUTCFullYear()),
+          companyId: company.id,
+          number: await nextInvoiceNumber(tx, company, issueDate.getUTCFullYear()),
           issueDate,
           operationType,
           clientId: client.id,
@@ -66,42 +39,31 @@ export async function createInvoice(input: unknown): Promise<ActionResult> {
           vatCents: totals.vatCents,
           totalCents: totals.totalCents,
           notes: data.notes || null,
-          lines: {
-            create: data.lines.map((l, i) => ({
-              description: l.description,
-              quantity: l.quantity,
-              unitPriceCents: l.unitPriceCents,
-              ...totals.lines[i],
-            })),
-          },
+          lines: { create: linesData(data.lines, totals) },
         },
       });
+      // Created from a bank collection: reconcile in the same transaction, or save nothing.
+      if (data.movementId) {
+        await linkMovement(tx, company.id, data.movementId, { type: "invoice", id: invoice.id, totalCents: invoice.totalCents });
+      }
+      number = invoice.number;
     });
   } catch (e) {
-    if (e instanceof UserFacingError) return { error: e.message };
-    if (isUniqueViolation(e, "taxId")) {
-      return {
-        error: "Ya existe un cliente con ese NIF. Selecciónalo en la lista de clientes.",
-        fieldErrors: { "client.taxId": "NIF ya registrado" },
-      };
-    }
-    if (isUniqueViolation(e, "number")) {
-      return { error: "Se guardó otra factura al mismo tiempo. Vuelve a intentarlo." };
-    }
-    console.error("createInvoice", e);
-    return { error: "No se pudo guardar la factura. Inténtalo de nuevo." };
+    return salesErrorResult(e, "createInvoice", "No se pudo guardar la factura. Inténtalo de nuevo.");
   }
 
-  redirect("/facturas");
+  redirect(data.movementId ? `/banco/conciliacion?conciliado=${encodeURIComponent(`Factura ${number}`)}` : "/facturas");
 }
 
 export async function markInvoicePaid(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
+  const company = await getActiveCompany();
+  if (!company) return NO_COMPANY;
   const id = z.uuid().safeParse(formData.get("id"));
   if (!id.success) return { error: "Factura no válida." };
 
   try {
     const { count } = await db.invoice.updateMany({
-      where: { id: id.data, status: "PENDIENTE" },
+      where: { id: id.data, companyId: company.id, status: "PENDIENTE" },
       data: { status: "COBRADA", paidAt: new Date() },
     });
     if (count === 0) return { error: "La factura no existe o ya estaba cobrada." };

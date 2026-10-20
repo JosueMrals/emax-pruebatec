@@ -2,6 +2,7 @@
 
 import { useId, useState, useTransition } from "react";
 import { createExpense } from "@/actions/expenses";
+import { BankMovementNotice, BankTotalCheck } from "@/components/bank-target";
 import { FieldError } from "@/components/field-error";
 import { OcrUpload } from "@/components/ocr-upload";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -11,9 +12,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import type { ActionResult } from "@/lib/action-errors";
+import type { MovementPrefill } from "@/lib/bank/movement-prefill";
+import { solveBaseForTotal } from "@/lib/fiscal/solve-base";
 import { expenseTotals, IRPF_RATES } from "@/lib/fiscal/expenses";
 import { VAT_RATES } from "@/lib/fiscal/totals";
-import { formatCents, parseEurosToCents } from "@/lib/money";
+import { centsToInput, formatCents, parseEurosToCents } from "@/lib/money";
 import type { OcrResult } from "@/lib/ocr/expense-extraction";
 import { normalizeTaxId } from "@/lib/tax-id";
 
@@ -23,15 +26,32 @@ export interface SupplierOption {
   taxId: string;
 }
 
-export function ExpenseForm({ suppliers, defaultDate }: { suppliers: SupplierOption[]; defaultDate: string }) {
+function baseForTotal(totalCents: number, vatRate: number, irpfRate: number) {
+  return solveBaseForTotal(totalCents, (baseCents) => expenseTotals({ baseCents, vatRate, irpfRate }).totalCents);
+}
+
+export function ExpenseForm({
+  suppliers,
+  defaultDate,
+  fromMovement,
+  defaultSupplierId = "",
+}: {
+  suppliers: SupplierOption[];
+  defaultDate: string;
+  // Bank payment this expense is created from: prefills it and reconciles it on save.
+  fromMovement?: MovementPrefill;
+  defaultSupplierId?: string;
+}) {
   const uid = useId();
   const [supplierMode, setSupplierMode] = useState<"existing" | "new">(suppliers.length ? "existing" : "new");
-  const [supplierId, setSupplierId] = useState("");
+  const [supplierId, setSupplierId] = useState(defaultSupplierId);
   const [newSupplier, setNewSupplier] = useState({ name: "", taxId: "" });
-  const [date, setDate] = useState(defaultDate);
+  const [date, setDate] = useState(fromMovement?.date ?? defaultDate);
   const [number, setNumber] = useState("");
-  const [description, setDescription] = useState("");
-  const [base, setBase] = useState("");
+  const [description, setDescription] = useState(fromMovement?.description ?? "");
+  const [base, setBase] = useState(() =>
+    fromMovement ? centsToInput(baseForTotal(fromMovement.amountCents, 21, 0).baseCents) : "",
+  );
   const [vatRate, setVatRate] = useState(21);
   const [irpfRate, setIrpfRate] = useState(0);
   const [deductible, setDeductible] = useState(true);
@@ -72,6 +92,14 @@ export function ExpenseForm({ suppliers, defaultDate }: { suppliers: SupplierOpt
     setResult({ error: null });
   }
 
+  // Recomputes the base so base + IVA - IRPF equals the bank amount with the current rates.
+  function adjustToBank(): boolean {
+    if (!fromMovement) return false;
+    const { baseCents: solved, exact } = baseForTotal(fromMovement.amountCents, vatRate, irpfRate);
+    setBase(centsToInput(solved));
+    return exact;
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const payload = {
@@ -87,6 +115,7 @@ export function ExpenseForm({ suppliers, defaultDate }: { suppliers: SupplierOpt
       irpfRate,
       deductible,
       source: ocrTotalCents === null ? ("MANUAL" as const) : ("OCR" as const),
+      movementId: fromMovement?.id ?? "",
     };
     startTransition(async () => {
       setResult(await createExpense(payload));
@@ -96,6 +125,7 @@ export function ExpenseForm({ suppliers, defaultDate }: { suppliers: SupplierOpt
   return (
     <form onSubmit={handleSubmit} noValidate className="grid gap-6 lg:grid-cols-[1fr_18rem] lg:items-start">
       <div className="grid min-w-0 gap-6">
+        {fromMovement && <BankMovementNotice movement={fromMovement} kind="expense" />}
         <OcrUpload onResult={applyOcr} />
 
         <Card>
@@ -282,6 +312,9 @@ export function ExpenseForm({ suppliers, defaultDate }: { suppliers: SupplierOpt
               </>
             )}
           </dl>
+          {fromMovement && (
+            <BankTotalCheck targetCents={fromMovement.amountCents} totalCents={totals.totalCents} onAdjust={adjustToBank} />
+          )}
           {ocrTotalCents !== null && Math.abs(ocrTotalCents - totals.totalCents) > 2 && (
             <p role="alert" className="rounded-md border border-destructive p-3 text-sm text-destructive">
               El total calculado no coincide con el de la factura. Revisa la base y los tipos de IVA e IRPF.
